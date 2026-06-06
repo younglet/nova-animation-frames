@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NAF Viewer — Nova Animation Frames</title>
+<style>
+  :root { --bg: #1a1a2e; --panel: #16213e; --accent: #0f3460; --text: #e0e0e0; --hl: #e94560; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif;
+         display:flex; flex-direction:column; align-items:center; min-height:100vh; padding:20px; }
+  h1 { font-size:1.3em; margin-bottom:16px; }
+  h1 span { color:var(--hl); }
+  #dropzone {
+    width:100%; max-width:560px; min-height:100px;
+    border:2px dashed #444; border-radius:10px;
+    display:flex; align-items:center; justify-content:center;
+    margin-bottom:14px; cursor:pointer; transition:border-color .2s,color .2s;
+    color:#888; font-size:0.9em; text-align:center; padding:16px;
+  }
+  #dropzone.dragover { border-color:var(--hl); color:var(--hl); }
+  #dropzone.has-file { border-color:#2ecc71; min-height:50px; }
+  #info { font-size:0.85em; color:#aaa; margin-bottom:10px; text-align:center; min-height:1.2em; }
+  #viewer { margin-bottom:12px; }
+  #viewer canvas { border:1px solid #333; border-radius:3px; background:#000; display:block; }
+  #controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:center; }
+  button {
+    background:var(--accent); color:var(--text); border:none;
+    padding:7px 14px; border-radius:5px; cursor:pointer; font-size:0.85em;
+  }
+  button:hover { background:#1a4a8a; }
+  button:active { background:var(--hl); }
+  button:disabled { opacity:0.35; cursor:default; }
+  input[type=range] { width:130px; accent-color:var(--hl); }
+  #frame-label { font-size:0.85em; min-width:80px; text-align:center; }
+  #fps-label, #scale-label { font-size:0.75em; color:#aaa; min-width:45px; }
+  footer { margin-top:18px; font-size:0.7em; color:#444; }
+</style>
+</head>
+<body>
+
+<h1>Nova <span>Animation Frames</span> Viewer</h1>
+
+<div id="dropzone">
+  📁 Drop a <strong>.naf</strong> file, or click to browse
+  <input type="file" id="fileinput" accept=".naf" hidden>
+</div>
+
+<div id="info"></div>
+<div id="viewer"></div>
+
+<div id="controls">
+  <button id="btn-prev" disabled>⏮</button>
+  <button id="btn-play" disabled>▶ Play</button>
+  <button id="btn-next" disabled>⏭</button>
+  <input type="range" id="frame-slider" min="0" max="0" value="0" disabled>
+  <span id="frame-label">0 / 0</span>
+  <span style="color:#444">|</span>
+  <span style="font-size:0.8em">FPS</span>
+  <input type="range" id="fps-slider" min="1" max="30" value="10">
+  <span id="fps-label">10 fps</span>
+  <span style="color:#444">|</span>
+  <span style="font-size:0.8em">Scale</span>
+  <input type="range" id="scale-slider" min="1" max="8" value="2">
+  <span id="scale-label">2x</span>
+</div>
+
+<footer>Nova Animation Frames &mdash; naf-render.js</footer>
+
+<script src="naf-render.js"></script>
+<script>
+  const dropzone   = document.getElementById('dropzone');
+  const fileinput  = document.getElementById('fileinput');
+  const info       = document.getElementById('info');
+  const btnPlay    = document.getElementById('btn-play');
+  const btnPrev    = document.getElementById('btn-prev');
+  const btnNext    = document.getElementById('btn-next');
+  const frameSlider = document.getElementById('frame-slider');
+  const frameLabel = document.getElementById('frame-label');
+  const fpsSlider  = document.getElementById('fps-slider');
+  const fpsLabel   = document.getElementById('fps-label');
+  const scaleSlider = document.getElementById('scale-slider');
+  const scaleLabel  = document.getElementById('scale-label');
+
+  let player = null;
+
+  function createPlayer() {
+    if (player) player.destroy();
+    const scale = parseInt(scaleSlider.value) || 2;
+    player = new NAFRender('#viewer', { scale, fps: 0, autoplay: false });
+    player.on('frame', i => {
+      frameSlider.value = i;
+      frameLabel.textContent = `${i + 1} / ${player.frameCount}`;
+    });
+    player.on('load', meta => {
+      info.innerHTML = `<strong>${meta.width}&times;${meta.height}</strong>, ${meta.frameCount} frames, ${meta.defaultDelay}ms`;
+      frameSlider.max = meta.frameCount - 1;
+      frameSlider.disabled = meta.frameCount < 2;
+      btnPlay.disabled = meta.frameCount < 2;
+      btnPrev.disabled = meta.frameCount < 2;
+      btnNext.disabled = meta.frameCount < 2;
+      frameLabel.textContent = `1 / ${meta.frameCount}`;
+    });
+  }
+
+  function loadFile(file) {
+    dropzone.classList.add('has-file');
+    dropzone.innerHTML = `📄 <strong>${file.name}</strong> — drop another to replace`;
+    dropzone.appendChild(fileinput);
+    createPlayer();
+    const reader = new FileReader();
+    reader.onload = () => {
+      player.loadBuffer(reader.result);
+      if (player.frameCount > 1) player.play();
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  // Drag & drop
+  dropzone.addEventListener('click', () => fileinput.click());
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault(); dropzone.classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f && f.name.endsWith('.naf')) loadFile(f);
+  });
+  fileinput.addEventListener('change', () => {
+    const f = fileinput.files[0];
+    if (f) loadFile(f);
+  });
+
+  // Controls
+  btnPlay.addEventListener('click', () => player && player.toggle());
+  btnPrev.addEventListener('click', () => { if (player) { player.pause(); player.seek(player.currentFrame - 1); } });
+  btnNext.addEventListener('click', () => { if (player) { player.pause(); player.step(); } });
+  frameSlider.addEventListener('input', () => { if (player) { player.pause(); player.seek(parseInt(frameSlider.value)); } });
+
+  fpsSlider.addEventListener('input', () => {
+    const v = parseInt(fpsSlider.value);
+    fpsLabel.textContent = v + ' fps';
+    if (player) { player._fps = v; if (player.isPlaying) { player.pause(); player.play(); } }
+  });
+
+  scaleSlider.addEventListener('input', () => {
+    const v = parseInt(scaleSlider.value);
+    scaleLabel.textContent = v + 'x';
+    if (player && player._naf) {
+      player._scale = v;
+      player._canvas.width  = player._naf.width * v;
+      player._canvas.height = player._naf.height * v;
+      player._render();
+    }
+  });
+
+  // Init — auto-load if ?file= specified
+  createPlayer();
+  const urlParams = new URLSearchParams(window.location.search);
+  const autoFile = urlParams.get('file');
+  if (autoFile) {
+    fetch(autoFile)
+      .then(r => r.arrayBuffer())
+      .then(buf => {
+        player.loadBuffer(buf);
+        info.textContent = 'Loaded: ' + autoFile;
+      })
+      .catch(e => { info.textContent = 'Failed to load: ' + autoFile; });
+  }
+</script>
+</body>
+</html>
