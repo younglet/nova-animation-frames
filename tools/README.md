@@ -21,10 +21,11 @@ python tools/mp42naf video.mp4 -o out.naf -W 128 -H 64 --fps 12 # 视频
 ## 其他参数
 
 ```
-  --delay 50        帧间隔 ms (默认 100)
-  --no-invert       关闭默认反相（黑底白图源用此项）
-  --no-delta        禁用帧间 Delta 压缩
-  -l 0              循环次数 (0=无限)
+  --fit contain      填充方式: stretch(默认) | contain(适应) | cover(裁剪)
+  --delay 50         帧间隔 ms (默认 100)
+  --no-invert        关闭默认反相（黑底白图源用此项）
+  --no-delta         禁用帧间 Delta 压缩
+  -l 0               循环次数 (0=无限)
 ```
 
 ## NAF → 其他格式

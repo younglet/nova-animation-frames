@@ -1,171 +1,1309 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NAF Viewer — Nova Animation Frames</title>
+<title>NAF 工具 — Nova Animation Frames</title>
 <style>
-  :root { --bg: #1a1a2e; --panel: #16213e; --accent: #0f3460; --text: #e0e0e0; --hl: #e94560; }
+  :root {
+    --bg: #1a1a2e; --panel: #16213e; --accent: #0f3460;
+    --text: #e0e0e0; --hl: #e94560; --green: #2ecc71;
+    --text-dim: #888;
+  }
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif;
-         display:flex; flex-direction:column; align-items:center; min-height:100vh; padding:20px; }
-  h1 { font-size:1.3em; margin-bottom:16px; }
+
+  body {
+    background:var(--bg); color:var(--text);
+    font-family:'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center;
+    padding:12px 16px 0;
+  }
+
+  /* ═══ 全局拖拽覆盖层 ═══ */
+  #global-drop-overlay {
+    display:none; position:fixed; inset:0; z-index:9999;
+    background:rgba(26,26,46,0.92); border:4px dashed var(--hl);
+    align-items:center; justify-content:center; flex-direction:column; gap:12px;
+    font-size:1.4em; color:var(--hl);
+  }
+  #global-drop-overlay.active { display:flex; }
+  #global-drop-overlay .icon { font-size:3em; }
+
+  /* ═══ 顶栏 ═══ */
+  header {
+    width:100%; max-width:960px; display:flex; align-items:center;
+    justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;
+    position:relative;
+  }
+  h1 { font-size:1.25em; white-space:nowrap; }
   h1 span { color:var(--hl); }
+
+  /* ═══ ESP32 角标 ═══ */
+  #esp32-corner {
+    display:flex; align-items:center; gap:6px;
+    font-size:0.78em; color:#888; cursor:pointer;
+    background:var(--panel); border:1px solid #333; border-radius:6px;
+    padding:5px 10px; user-select:none; white-space:nowrap;
+    transition:border-color .2s;
+  }
+  #esp32-corner:hover { border-color:var(--accent); }
+  #esp32-corner.connected { border-color:var(--green); color:var(--green); }
+  #esp32-corner .dot { width:8px; height:8px; border-radius:50%; background:#555; }
+  #esp32-corner.connected .dot { background:var(--green); }
+
+  /* ESP32 下拉面板 */
+  #esp32-dropdown {
+    display:none; position:absolute; top:100%; right:0;
+    margin-top:6px; background:var(--panel); border:1px solid #333;
+    border-radius:8px; padding:14px; min-width:280px; z-index:100;
+    box-shadow:0 8px 24px rgba(0,0,0,.5);
+  }
+  #esp32-dropdown.open { display:block; }
+  #esp32-dropdown .row { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+  #esp32-dropdown button {
+    background:var(--accent); color:var(--text); border:none;
+    padding:6px 14px; border-radius:5px; cursor:pointer; font-size:0.8em;
+  }
+  #esp32-dropdown button:hover { background:#1a4a8a; }
+  #esp32-dropdown button.primary { background:var(--green); color:#000; }
+  #esp32-dropdown button.primary:hover { background:#3ddb84; }
+  #esp32-dropdown button:disabled { opacity:0.4; cursor:default; }
+  #esp32-status-text { font-size:0.78em; color:var(--text-dim); }
+  #esp32-status-text.ok { color:var(--green); }
+  #esp32-status-text.err { color:var(--hl); }
+  #esp32-progress {
+    width:100%; height:4px; background:#333; border-radius:2px;
+    margin-top:6px; overflow:hidden; display:none;
+  }
+  #esp32-progress.on { display:block; }
+  #esp32-progress-bar { height:100%; background:var(--green); width:0%; border-radius:2px; transition:width .2s; }
+
+  /* ═══ Tab 导航 ═══ */
+  #tab-nav { display:flex; gap:0; }
+  #tab-nav button {
+    background:var(--panel); color:#999; border:1px solid #333;
+    padding:8px 18px; cursor:pointer; font-size:0.88em;
+    transition:background .2s,color .2s;
+  }
+  #tab-nav button:first-child { border-radius:6px 0 0 6px; }
+  #tab-nav button:last-child  { border-radius:0 6px 6px 0; }
+  #tab-nav button.active { background:var(--accent); color:var(--text); border-color:var(--accent); }
+
+  /* ═══ 主容器 ═══ */
+  #main-container { width:100%; max-width:960px; flex:1; }
+
+  .tab-content { display:none; }
+  .tab-content.active { display:block; }
+
+  /* ═══ 面板通用 ═══ */
+  .panel {
+    background:var(--panel); border:1px solid #2a2a4a;
+    border-radius:10px; padding:16px; margin-bottom:12px;
+  }
+
+  /* ═══ Tab 1: 转换器 ═══ */
+  #converter-dropzone {
+    border:2px dashed #555; border-radius:10px; min-height:90px;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--text-dim); font-size:0.88em; text-align:center; padding:16px;
+    cursor:pointer; transition:border-color .2s; flex-direction:column; gap:6px;
+  }
+  #converter-dropzone:hover, #converter-dropzone.dragover { border-color:var(--hl); color:var(--hl); }
+  #converter-dropzone .sub { font-size:0.75em; color:#666; }
+
+  #conv-meta { display:none; font-size:0.82em; color:var(--text-dim); margin-top:8px; }
+  #conv-meta.show { display:block; }
+
+  #url-input-row { display:flex; gap:8px; margin-top:8px; }
+  #url-input-row input {
+    flex:1; background:var(--bg); border:1px solid #444; border-radius:5px;
+    color:var(--text); padding:8px 12px; font-size:0.85em;
+  }
+  #url-input-row input::placeholder { color:#555; }
+  #url-input-row button {
+    background:var(--accent); color:var(--text); border:none;
+    padding:8px 16px; border-radius:5px; cursor:pointer; font-size:0.85em;
+  }
+  #url-input-row button:hover { background:#1a4a8a; }
+
+  .param-grid {
+    display:grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap:10px; margin-top:10px;
+  }
+  .param-grid label { font-size:0.8em; color:#aaa; display:flex; flex-direction:column; gap:3px; }
+  .param-grid label input[type=number] {
+    background:var(--bg); border:1px solid #444; border-radius:5px;
+    color:var(--text); padding:7px 10px; font-size:0.88em; width:100%;
+  }
+  .param-grid label input[type=range] { width:100%; }
+  .toggle-row { display:flex; align-items:center; gap:6px; font-size:0.85em; flex-direction:row !important; }
+  .toggle-row input[type=checkbox] { accent-color:var(--hl); width:16px; height:16px; margin:0; }
+
+  #delay-row { transition:opacity .3s; }
+  #delay-row.hidden { opacity:0.3; pointer-events:none; }
+
+  #btn-convert {
+    width:100%; margin-top:12px; padding:11px;
+    background:var(--hl); color:#fff; border:none;
+    border-radius:8px; font-size:1em; cursor:pointer;
+    font-weight:bold; letter-spacing:1px;
+  }
+  #btn-convert:hover { background:#ff5a7a; }
+  #btn-convert:disabled { opacity:0.4; cursor:default; background:#666; }
+
+  #preview-wrap { text-align:center; margin-top:8px; }
+  #preview-wrap canvas { border:1px solid #333; border-radius:3px; background:#000; image-rendering:pixelated; max-width:100%; }
+  #convert-status { font-size:0.82em; color:var(--text-dim); text-align:center; min-height:1.2em; margin-top:6px; }
+
+  /* ═══ Tab 2: 画廊 ═══ */
+  #gallery-grid {
+    display:grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap:10px;
+  }
+  .gallery-card {
+    background:var(--panel); border:1px solid #2a2a4a; border-radius:8px;
+    padding:10px; cursor:pointer; transition:border-color .2s,transform .15s;
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+  }
+  .gallery-card:hover { border-color:var(--accent); transform:translateY(-1px); }
+  .gallery-card .gfx-wrap {
+    width:100%; aspect-ratio:2/1; background:#000; border-radius:4px;
+    overflow:hidden; display:flex; align-items:center; justify-content:center;
+  }
+  .gallery-card .gfx-wrap canvas { image-rendering:pixelated; display:block; }
+  .gallery-card .gfx-wrap .placeholder {
+    color:var(--text-dim); font-size:0.7em;
+  }
+  .gallery-card .meta {
+    width:100%; font-size:0.68em; color:var(--text-dim);
+    line-height:1.5; text-align:center;
+  }
+  .gallery-card .meta strong { color:var(--text); font-size:0.95em; display:block; margin-bottom:2px; }
+  .gallery-card .actions {
+    display:flex; gap:6px; flex-wrap:wrap; justify-content:center;
+  }
+  .gallery-card .actions button {
+    background:var(--accent); color:var(--text); border:none; border-radius:4px;
+    padding:4px 10px; cursor:pointer; font-size:0.68em; width:100%;
+  }
+  .gallery-card .actions button:hover { background:#1a4a8a; }
+  .gallery-card .actions button:disabled { opacity:0.3; cursor:not-allowed; background:#333; }
+
+  /* ═══ Tab 3: 播放器 ═══ */
   #dropzone {
-    width:100%; max-width:560px; min-height:100px;
+    width:100%; min-height:80px;
     border:2px dashed #444; border-radius:10px;
     display:flex; align-items:center; justify-content:center;
-    margin-bottom:14px; cursor:pointer; transition:border-color .2s,color .2s;
-    color:#888; font-size:0.9em; text-align:center; padding:16px;
+    margin-bottom:12px; cursor:pointer; transition:border-color .2s,color .2s;
+    color:var(--text-dim); font-size:0.88em; text-align:center; padding:14px;
   }
   #dropzone.dragover { border-color:var(--hl); color:var(--hl); }
-  #dropzone.has-file { border-color:#2ecc71; min-height:50px; }
-  #info { font-size:0.85em; color:#aaa; margin-bottom:10px; text-align:center; min-height:1.2em; }
-  #viewer { margin-bottom:12px; }
-  #viewer canvas { border:1px solid #333; border-radius:3px; background:#000; display:block; }
-  #controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:center; }
-  button {
-    background:var(--accent); color:var(--text); border:none;
-    padding:7px 14px; border-radius:5px; cursor:pointer; font-size:0.85em;
+  #dropzone.has-file { border-color:var(--green); min-height:36px; }
+
+  #info { font-size:0.82em; color:var(--text-dim); text-align:center; min-height:1.2em; margin-bottom:8px; }
+  #viewer { margin-bottom:8px; display:flex; justify-content:center; }
+  #viewer canvas { border:1px solid #333; border-radius:4px; background:#000; display:block; image-rendering:pixelated; }
+
+  #controls {
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+    justify-content:center; font-size:0.82em;
   }
-  button:hover { background:#1a4a8a; }
-  button:active { background:var(--hl); }
-  button:disabled { opacity:0.35; cursor:default; }
-  input[type=range] { width:130px; accent-color:var(--hl); }
-  #frame-label { font-size:0.85em; min-width:80px; text-align:center; }
-  #fps-label, #scale-label { font-size:0.75em; color:#aaa; min-width:45px; }
-  footer { margin-top:18px; font-size:0.7em; color:#444; }
+  #controls button {
+    background:var(--accent); color:var(--text); border:none;
+    padding:5px 10px; border-radius:5px; cursor:pointer; font-size:0.82em;
+    white-space:nowrap;
+  }
+  #controls button:hover { background:#1a4a8a; }
+  #controls button:active { background:var(--hl); }
+  #controls button:disabled { opacity:0.35; cursor:default; }
+  input[type=range] { accent-color:var(--hl); }
+  #frame-label { min-width:65px; text-align:center; }
+  #fps-label, #scale-label { font-size:0.78em; color:var(--text-dim); min-width:35px; }
+
+  /* ═══ 底部 ═══ */
+  footer {
+    width:100%; max-width:960px; text-align:center;
+    padding:14px 0; font-size:0.68em; color:#444;
+  }
+
+  /* ═══ 响应式 ═══ */
+  @media (max-width:600px) {
+    body { padding:6px; }
+    header { flex-direction:column; align-items:flex-start; }
+    #esp32-dropdown { right:auto; left:0; }
+    #gallery-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+    #tab-nav button { padding:6px 10px; font-size:0.78em; }
+    .param-grid { grid-template-columns:1fr 1fr; }
+    #controls { gap:3px; }
+    #controls button { padding:4px 7px; font-size:0.72em; }
+  }
 </style>
 </head>
 <body>
 
-<h1>Nova <span>Animation Frames</span> Viewer</h1>
-
-<div id="dropzone">
-  📁 Drop a <strong>.naf</strong> file, or click to browse
-  <input type="file" id="fileinput" accept=".naf" hidden>
+<!-- 全局拖拽覆盖层 -->
+<div id="global-drop-overlay">
+  <span class="icon">📁</span>
+  <span>释放文件以加载</span>
 </div>
 
-<div id="info"></div>
-<div id="viewer"></div>
+<!-- ═══ 顶栏 ═══ -->
+<header>
+  <h1>Nova <span>Animation Frames</span> 工具</h1>
 
-<div id="controls">
-  <button id="btn-prev" disabled>⏮</button>
-  <button id="btn-play" disabled>▶ Play</button>
-  <button id="btn-next" disabled>⏭</button>
-  <input type="range" id="frame-slider" min="0" max="0" value="0" disabled>
-  <span id="frame-label">0 / 0</span>
-  <span style="color:#444">|</span>
-  <span style="font-size:0.8em">FPS</span>
-  <input type="range" id="fps-slider" min="1" max="30" value="10">
-  <span id="fps-label">10 fps</span>
-  <span style="color:#444">|</span>
-  <span style="font-size:0.8em">Scale</span>
-  <input type="range" id="scale-slider" min="1" max="8" value="2">
-  <span id="scale-label">2x</span>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <nav id="tab-nav">
+      <button class="active" data-tab="converter">🔄 NAF转换器</button>
+      <button data-tab="gallery">🖼️ 画廊</button>
+      <button data-tab="player">🎬 NAF播放器</button>
+    </nav>
+
+    <!-- ESP32 角标 -->
+    <div id="esp32-corner" title="连接 ESP32 设备">
+      <span class="dot"></span> ESP32
+    </div>
+    <div id="esp32-dropdown">
+      <div class="row">
+        <button id="btn-esp-connect">连接设备</button>
+        <button id="btn-esp-send" class="primary" style="display:none;">写入到 /nafs/</button>
+      </div>
+      <div id="esp32-status-text">未连接</div>
+      <div id="esp32-progress"><div id="esp32-progress-bar"></div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ 主容器 ═══ -->
+<div id="main-container">
+
+  <!-- ═══════════════ TAB 1: 转换器 ═══════════════ -->
+  <div id="tab-converter" class="tab-content active">
+
+    <div class="panel">
+      <h2 style="font-size:1em;margin-bottom:10px;">📥 导入图片 <span style="font-size:0.7em;color:var(--hl);">支持 JPG / PNG / GIF</span></h2>
+
+      <div id="converter-dropzone">
+        <span>🖼️ 拖拽图片到此处</span>
+        <span class="sub">也可粘贴图片 URL 到下方输入框</span>
+        <input type="file" id="img-fileinput" accept="image/jpeg,image/png,image/gif,image/webp,image/bmp" hidden>
+      </div>
+      <div id="conv-meta"></div>
+      <div id="conv-repick" style="display:none;margin-top:8px;">
+        <button id="btn-repick" style="background:var(--accent);color:var(--text);border:none;padding:6px 14px;border-radius:5px;cursor:pointer;font-size:0.82em;">重新选择图片</button>
+      </div>
+
+      <div id="url-input-row">
+        <input type="text" id="img-url" placeholder="或粘贴图片 URL...">
+        <button id="btn-load-url">加载</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2 style="font-size:1em;margin-bottom:10px;">⚙️ 转换参数</h2>
+
+      <div style="font-size:0.75em;color:var(--text-dim);margin-bottom:8px;">尺寸与布局</div>
+      <div class="param-grid">
+        <label>目标宽度 (px)
+          <input type="number" id="param-width" value="128" min="1" max="1024">
+        </label>
+        <label>目标高度 (px)
+          <input type="number" id="param-height" value="64" min="1" max="1024">
+        </label>
+        <label>填充方式
+          <select id="param-fit" style="background:var(--bg);border:1px solid #444;border-radius:5px;color:var(--text);padding:7px 10px;font-size:0.88em;">
+            <option value="stretch">拉伸填充</option>
+            <option value="contain">适应比例</option>
+            <option value="cover">裁剪填充</option>
+          </select>
+        </label>
+      </div>
+
+      <div style="font-size:0.75em;color:var(--text-dim);margin:10px 0 8px;">图像处理</div>
+      <div class="param-grid">
+        <label>阈值
+          <input type="range" id="param-threshold" min="0" max="255" value="128">
+        </label>
+        <label id="delay-row" class="hidden">帧延迟 (ms)
+          <input type="number" id="param-delay" value="100" min="10" max="60000">
+        </label>
+      </div>
+
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:4px;">
+        <label class="toggle-row"><input type="checkbox" id="param-dither" checked> Floyd-Steinberg 抖动</label>
+        <label class="toggle-row"><input type="checkbox" id="param-invert" checked> 反色</label>
+      </div>
+
+      <div id="preview-wrap"></div>
+
+      <button id="btn-convert" disabled>🚀 开始转换</button>
+      <div id="convert-status"></div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════ TAB 2: 画廊 ═══════════════ -->
+  <div id="tab-gallery" class="tab-content">
+    <div class="panel">
+      <h2 style="font-size:1em;margin-bottom:6px;">🖼️ 示例画廊</h2>
+      <div id="gallery-progress-text" style="font-size:0.72em;color:var(--text-dim);margin-bottom:6px;"></div>
+      <div id="gallery-grid"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ TAB 3: 播放器 ═══════════════ -->
+  <div id="tab-player" class="tab-content">
+
+    <div class="panel">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:0.82em;">
+        <span style="color:var(--text-dim);white-space:nowrap;">文件名</span>
+        <input id="naf-filename-input" style="flex:1;background:var(--bg);border:1px solid #444;border-radius:4px;color:var(--text);padding:4px 8px;font-size:0.85em;" value="" placeholder="未加载">
+        <span style="color:var(--text-dim);white-space:nowrap;">.naf</span>
+      </div>
+      <div id="info"></div>
+      <div id="viewer"></div>
+      <div id="controls">
+        <button id="btn-prev" disabled>⏮</button>
+        <button id="btn-play" disabled>▶ 播放</button>
+        <button id="btn-next" disabled>⏭</button>
+        <input type="range" id="frame-slider" min="0" max="0" value="0" disabled>
+        <span id="frame-label">0 / 0</span>
+        <span style="color:#444">|</span>
+        <span style="font-size:0.78em">帧率</span>
+        <input type="range" id="fps-slider" min="1" max="30" value="10">
+        <span id="fps-label">10 fps</span>
+        <span style="color:#444">|</span>
+        <span style="font-size:0.78em">缩放</span>
+        <input type="range" id="scale-slider" min="1" max="8" value="2">
+        <span id="scale-label">2x</span>
+        <span style="color:#444">|</span>
+        <label class="toggle-row" style="font-size:0.78em;gap:4px;">
+          <input type="checkbox" id="param-player-invert"> 反色
+        </label>
+      </div>
+      <div style="text-align:center;margin-top:10px;">
+        <button id="btn-download" disabled style="width:100%;background:var(--accent);color:var(--text);border:none;padding:8px 14px;border-radius:5px;cursor:pointer;font-size:0.85em;">下载到 ESP32</button>
+        <style>#btn-download:disabled { opacity:0.25; cursor:not-allowed; }</style>
+      </div>
+    </div>
+
+  </div>
+
 </div>
 
-<footer>Nova Animation Frames &mdash; naf-render.js</footer>
+  <!-- ═══ 底部写入进度条 ═══ -->
+  <div id="write-progress-bar" style="position:fixed;bottom:0;left:0;right:0;z-index:500;display:none;padding:10px 20px;background:var(--panel);border-top:2px solid #2a2a4a;">
+    <div style="max-width:960px;margin:0 auto;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <span style="font-size:0.8em;color:var(--text-dim);">正在写入 ESP32</span>
+        <span id="write-progress-pct" style="font-size:0.85em;color:var(--green);font-weight:bold;">0%</span>
+      </div>
+      <div style="height:6px;background:#333;border-radius:3px;overflow:hidden;">
+        <div id="write-progress-fill" style="height:100%;background:var(--green);width:0%;border-radius:3px;transition:width .25s;"></div>
+      </div>
+    </div>
+  </div>
 
+<footer>Nova Animation Frames — naf-render.js + naf.js</footer>
+
+<!-- ═══ 依赖 ═══ -->
+<link rel="stylesheet" href="js/notyf.min.css">
+<script src="js/omggif.js"></script>
+<script src="js/naf.js"></script>
+<script src="js/notyf.min.js"></script>
 <script src="naf-render.js"></script>
+<script src="js/esp32-serial.js"></script>
+
 <script>
-  const dropzone   = document.getElementById('dropzone');
-  const fileinput  = document.getElementById('fileinput');
-  const info       = document.getElementById('info');
-  const btnPlay    = document.getElementById('btn-play');
-  const btnPrev    = document.getElementById('btn-prev');
-  const btnNext    = document.getElementById('btn-next');
-  const frameSlider = document.getElementById('frame-slider');
-  const frameLabel = document.getElementById('frame-label');
-  const fpsSlider  = document.getElementById('fps-slider');
-  const fpsLabel   = document.getElementById('fps-label');
-  const scaleSlider = document.getElementById('scale-slider');
-  const scaleLabel  = document.getElementById('scale-label');
+// ════════════════════════════════════════════════════════════
+//  DOM 快捷引用
+// ════════════════════════════════════════════════════════════
+const $  = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
 
-  let player = null;
+// 全局拖拽
+const globalOverlay = $('#global-drop-overlay');
 
-  function createPlayer() {
-    if (player) player.destroy();
-    const scale = parseInt(scaleSlider.value) || 2;
-    player = new NAFRender('#viewer', { scale, fps: 0, autoplay: false });
-    player.on('frame', i => {
-      frameSlider.value = i;
-      frameLabel.textContent = `${i + 1} / ${player.frameCount}`;
-    });
-    player.on('load', meta => {
-      info.innerHTML = `<strong>${meta.width}&times;${meta.height}</strong>, ${meta.frameCount} frames, ${meta.defaultDelay}ms`;
-      frameSlider.max = meta.frameCount - 1;
-      frameSlider.disabled = meta.frameCount < 2;
-      btnPlay.disabled = meta.frameCount < 2;
-      btnPrev.disabled = meta.frameCount < 2;
-      btnNext.disabled = meta.frameCount < 2;
-      frameLabel.textContent = `1 / ${meta.frameCount}`;
-    });
+// Tab
+const tabNav     = $('#tab-nav');
+const tabConv    = $('#tab-converter');
+const tabGallery = $('#tab-gallery');
+const tabPlayer  = $('#tab-player');
+
+// 播放器
+const dropzone    = $('#dropzone');
+const fileinput   = $('#fileinput');
+const info        = $('#info');
+const viewer      = $('#viewer');
+const btnPlay     = $('#btn-play');
+const btnPrev     = $('#btn-prev');
+const btnNext     = $('#btn-next');
+const frameSlider = $('#frame-slider');
+const frameLabel  = $('#frame-label');
+const fpsSlider   = $('#fps-slider');
+const fpsLabel    = $('#fps-label');
+const scaleSlider = $('#scale-slider');
+const scaleLabel  = $('#scale-label');
+const playerInvert = $('#param-player-invert');
+const btnDownload = $('#btn-download');
+const nafFilenameInput = $('#naf-filename-input');
+
+// 转换器
+const converterDZ  = $('#converter-dropzone');
+const imgFileInput = $('#img-fileinput');
+const convMeta     = $('#conv-meta');
+const imgUrlInput  = $('#img-url');
+const btnLoadUrl   = $('#btn-load-url');
+const btnConvert   = $('#btn-convert');
+const convertStatus = $('#convert-status');
+const convRepick   = $('#conv-repick');
+const btnRepick    = $('#btn-repick');
+const previewWrap  = $('#preview-wrap');
+const paramWidth    = $('#param-width');
+const paramHeight   = $('#param-height');
+const paramThreshold = $('#param-threshold');
+const paramDither   = $('#param-dither');
+const paramInvert   = $('#param-invert');
+const paramDelay    = $('#param-delay');
+const paramFit      = $('#param-fit');
+const delayRow      = $('#delay-row');
+
+// ESP32
+const esp32Corner  = $('#esp32-corner');
+const esp32Dropdown = $('#esp32-dropdown');
+const esp32StatusT  = $('#esp32-status-text');
+const btnEspConn    = $('#btn-esp-connect');
+const btnEspSend    = $('#btn-esp-send');
+const esp32Prog     = $('#esp32-progress');
+const esp32ProgBar  = $('#esp32-progress-bar');
+
+// ════════════════════════════════════════════════════════════
+//  检测：必须通过 http://localhost 访问
+// ════════════════════════════════════════════════════════════
+if (location.protocol === 'file:') {
+  document.body.innerHTML = '<div style="max-width:500px;margin:80px auto;padding:30px;background:#16213e;border:2px solid #e94560;border-radius:10px;color:#e0e0e0;text-align:center;font-family:sans-serif;"><h2 style="color:#e94560;">不要直接双击打开 HTML！</h2><p>请在终端运行 <code style="background:#0a0a1a;padding:3px 8px;border-radius:3px;">python server.py 6789</code></p><p>然后在 Chrome 地址栏输入：</p><p><b style="color:#2ecc71;font-size:1.1em;">http://localhost:6789/tools/web/demo.html</b></p></div>';
+  throw new Error('Must use http://localhost');
+}
+
+// ════════════════════════════════════════════════════════════
+//  全局状态
+// ════════════════════════════════════════════════════════════
+let player          = null;
+let currentNAFBuffer = null;
+let currentNAFName  = '';
+let esp32           = null;
+let converterImage  = null;
+let isAnimatedSource = false;  // GIF → 显示 delay 参数
+
+// Notyf 实例
+const notyf = new Notyf({
+  duration: 3500,
+  position: { x: 'right', y: 'top' },
+  types: [
+    { type: 'info', background: '#0f3460', icon: false },
+    { type: 'success', background: '#2ecc71', icon: false },
+  ]
+});
+
+// ════════════════════════════════════════════════════════════
+//  Tab 切换
+// ════════════════════════════════════════════════════════════
+tabNav.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-tab]');
+  if (!btn) return;
+  switchTab(btn.dataset.tab);
+});
+
+function switchTab(name) {
+  tabNav.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  const btn = tabNav.querySelector(`button[data-tab="${name}"]`);
+  if (btn) btn.classList.add('active');
+
+  $$('.tab-content').forEach(tc => tc.classList.remove('active'));
+  const target = document.getElementById(`tab-${name}`);
+  if (target) target.classList.add('active');
+}
+
+// ════════════════════════════════════════════════════════════
+//  全局拖拽（整个页面）
+// ════════════════════════════════════════════════════════════
+let dragCounter = 0;
+document.addEventListener('dragenter', e => { e.preventDefault(); dragCounter++; if (dragCounter===1) globalOverlay.classList.add('active'); });
+document.addEventListener('dragleave', e => { e.preventDefault(); dragCounter--; if (dragCounter===0) globalOverlay.classList.remove('active'); });
+document.addEventListener('dragover',  e => { e.preventDefault(); });
+document.addEventListener('drop', e => {
+  e.preventDefault(); dragCounter = 0; globalOverlay.classList.remove('active');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext === 'naf') {
+    switchTab('player');
+    loadNAFFile(file);
+  } else if (['jpg','jpeg','png','gif','bmp','webp'].includes(ext)) {
+    switchTab('converter');
+    loadConverterImage(file);
   }
+});
 
-  function loadFile(file) {
-    dropzone.classList.add('has-file');
-    dropzone.innerHTML = `📄 <strong>${file.name}</strong> — drop another to replace`;
-    dropzone.appendChild(fileinput);
-    createPlayer();
+// ════════════════════════════════════════════════════════════
+//  TAB 1: 转换器
+// ════════════════════════════════════════════════════════════
+
+// 拖拽区
+converterDZ.addEventListener('click', () => imgFileInput.click());
+converterDZ.addEventListener('dragover', e => { e.preventDefault(); converterDZ.classList.add('dragover'); });
+converterDZ.addEventListener('dragleave', () => converterDZ.classList.remove('dragover'));
+converterDZ.addEventListener('drop', e => {
+  e.stopPropagation(); e.preventDefault(); converterDZ.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f && /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(f.name)) loadConverterImage(f);
+});
+imgFileInput.addEventListener('change', () => {
+  const f = imgFileInput.files[0];
+  if (f) loadConverterImage(f);
+});
+
+// URL 加载
+btnLoadUrl.addEventListener('click', () => {
+  const url = imgUrlInput.value.trim();
+  if (url) { switchTab('converter'); loadConverterImageFromURL(url); }
+});
+imgUrlInput.addEventListener('keydown', e => { if (e.key==='Enter') btnLoadUrl.click(); });
+
+// 参数变化 → 更新预览
+paramWidth.addEventListener('input', refreshPreview);
+paramHeight.addEventListener('input', refreshPreview);
+paramWidth.addEventListener('change', refreshPreview);
+paramHeight.addEventListener('change', refreshPreview);
+paramThreshold.addEventListener('input', refreshPreview);
+paramDither.addEventListener('change', refreshPreview);
+paramInvert.addEventListener('change', refreshPreview);
+paramFit.addEventListener('change', refreshPreview);
+
+btnRepick.addEventListener('click', () => {
+  // 隐藏参数面板 + 重选按钮，显示导入面板
+
+  convRepick.style.display = 'none';
+  converterImage = null;
+  previewWrap.innerHTML = '';
+  btnConvert.disabled = true;
+});
+
+function refreshPreview() { if (converterImage) updateConverterUI(converterImage); }
+
+/** 从文件加载图片 */
+function loadConverterImage(file) {
+  switchTab('converter');
+  convertStatus.textContent = '加载中...';
+
+  if (/\.gif$/i.test(file.name)) {
+    // GIF → 解析帧
+    convertStatus.textContent = '解析 GIF 中...';
     const reader = new FileReader();
     reader.onload = () => {
-      player.loadBuffer(reader.result);
-      if (player.frameCount > 1) player.play();
+      try {
+        const result = decodeGIFFrames(reader.result);
+        const frame0 = result.frames[0];
+        const dataUrl = frame0.canvas.toDataURL('image/png');
+        const img = new Image();
+        img.onload = () => {
+          converterImage = img;
+          converterImage._gifBuffer = reader.result;
+          converterImage._gifFrames = result.frames;
+          converterImage._srcName = file.name.replace(/\.[^.]+$/, '');
+          isAnimatedSource = true;
+          delayRow.classList.remove('hidden');
+          paramDelay.value = result.frames[0].delay || 100;
+          converterDZ.innerHTML = `🎞️ <strong>${file.name}</strong>`;
+          converterDZ.appendChild(imgFileInput);
+          convMeta.classList.add('show');
+          convMeta.innerHTML = `尺寸 ${frame0.width}×${frame0.height} · ${result.frames.length} 帧 · ${(reader.result.byteLength/1024).toFixed(1)} KB`;
+          updateConverterUI(img);
+          btnConvert.disabled = false;
+          convertStatus.textContent = '';
+        };
+        img.src = dataUrl;
+      } catch (e) {
+        convertStatus.textContent = '❌ GIF 解析失败: ' + e.message;
+        console.error(e);
+      }
     };
     reader.readAsArrayBuffer(file);
+    return;
   }
 
-  // Drag & drop
-  dropzone.addEventListener('click', () => fileinput.click());
-  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
-  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
-  dropzone.addEventListener('drop', e => {
-    e.preventDefault(); dropzone.classList.remove('dragover');
-    const f = e.dataTransfer.files[0];
-    if (f && f.name.endsWith('.naf')) loadFile(f);
-  });
-  fileinput.addEventListener('change', () => {
-    const f = fileinput.files[0];
-    if (f) loadFile(f);
-  });
+  // 静态图片
+  isAnimatedSource = false;
+  delayRow.classList.add('hidden');
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      converterImage = img;
+      converterImage._srcName = file.name.replace(/\.[^.]+$/, '');
+      converterDZ.innerHTML = `📄 <strong>${file.name}</strong>`;
+      converterDZ.appendChild(imgFileInput);
+      convMeta.classList.add('show');
+      convMeta.innerHTML = `尺寸 ${img.naturalWidth}×${img.naturalHeight} · ${(file.size/1024).toFixed(1)} KB`;
+      updateConverterUI(img);
+      btnConvert.disabled = false;
+      convRepick.style.display = "block";
+    };
+    img.onerror = () => { convertStatus.textContent = '❌ 图片加载失败'; };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
 
-  // Controls
-  btnPlay.addEventListener('click', () => player && player.toggle());
-  btnPrev.addEventListener('click', () => { if (player) { player.pause(); player.seek(player.currentFrame - 1); } });
-  btnNext.addEventListener('click', () => { if (player) { player.pause(); player.step(); } });
-  frameSlider.addEventListener('input', () => { if (player) { player.pause(); player.seek(parseInt(frameSlider.value)); } });
+/** 从 URL 加载图片 */
+function loadConverterImageFromURL(url) {
+  switchTab('converter');
+  convertStatus.textContent = '下载中...';
 
-  fpsSlider.addEventListener('input', () => {
-    const v = parseInt(fpsSlider.value);
-    fpsLabel.textContent = v + ' fps';
-    if (player) { player._fps = v; if (player.isPlaying) { player.pause(); player.play(); } }
-  });
+  // 先尝试 fetch 获取原始数据（支持 GIF 多帧解析）
+  fetch(url)
+    .then(resp => {
+      if (!resp.ok) throw new Error('服务器返回 ' + resp.status + (resp.status === 404 ? '（文件不存在）' : ''));
+      return resp.arrayBuffer();
+    })
+    .then(buffer => {
+      const u8 = new Uint8Array(buffer);
+      // 检测 GIF 魔术字节
+      const isGIF = u8.length >= 6 &&
+        u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46 && // "GIF"
+        u8[3] === 0x38 && (u8[4] === 0x37 || u8[4] === 0x39) && u8[5] === 0x61; // "87a" or "89a"
 
-  scaleSlider.addEventListener('input', () => {
-    const v = parseInt(scaleSlider.value);
-    scaleLabel.textContent = v + 'x';
-    if (player && player._naf) {
-      player._scale = v;
-      player._canvas.width  = player._naf.width * v;
-      player._canvas.height = player._naf.height * v;
-      player._render();
+      if (isGIF) {
+        // 解析 GIF 多帧
+        const result = decodeGIFFrames(buffer);
+        const frame0 = result.frames[0];
+        const dataUrl = frame0.canvas.toDataURL('image/png');
+        const img = new Image();
+        img.onload = () => {
+          converterImage = img;
+          converterImage._gifBuffer = buffer;
+          converterImage._gifFrames = result.frames;
+          converterImage._srcName = url.split('/').pop().replace(/\.[^.]+$/, '') || 'gif';
+          isAnimatedSource = true;
+          delayRow.classList.remove('hidden');
+          paramDelay.value = result.frames[0].delay || 100;
+          converterDZ.innerHTML = `🌐 <strong>${url.substring(0,40)}...</strong>`;
+          converterDZ.appendChild(imgFileInput);
+          convMeta.classList.add('show');
+          convMeta.innerHTML = `GIF 动画 · ${frame0.width}×${frame0.height} · ${result.frames.length} 帧 · ${(buffer.byteLength/1024).toFixed(1)} KB`;
+          updateConverterUI(img);
+          btnConvert.disabled = false;
+          convertStatus.textContent = '';
+        };
+        img.src = dataUrl;
+      } else {
+        loadImageFromURLFallback(url, buffer);
+      }
+    })
+    .catch(e => {
+      const msg = e.message || '';
+      if (msg.includes('404') || msg.includes('不存在')) {
+        notyf.error('该 URL 返回 404，文件不存在');
+      } else if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch')) {
+        notyf.error('无法访问该 URL（跨域限制或网络不通）');
+      } else {
+        notyf.error('加载失败：' + (msg || '未知错误'));
+      }
+      convertStatus.textContent = '❌ 加载失败';
+    });
+}
+
+function loadImageFromURLFallback(url, buffer) {
+  isAnimatedSource = false;
+  delayRow.classList.add('hidden');
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    converterImage = img;
+    converterImage._srcName = url.split('/').pop().replace(/\.[^.]+$/, '') || 'image';
+    converterDZ.innerHTML = `🌐 <strong>${url.substring(0,40)}...</strong>`;
+    converterDZ.appendChild(imgFileInput);
+    convMeta.classList.add('show');
+    const sizeStr = buffer ? (buffer.byteLength / 1024).toFixed(1) + ' KB' : '';
+    convMeta.innerHTML = `尺寸 ${img.naturalWidth}×${img.naturalHeight} ${sizeStr}`;
+    updateConverterUI(img);
+    btnConvert.disabled = false;
+    convertStatus.textContent = '';
+    convRepick.style.display = "block";
+  };
+  img.onerror = () => {
+    convertStatus.textContent = '❌ 无法加载该 URL（可能跨域或无效图片）';
+  };
+  img.src = url;
+}
+
+/** 绘制图片到目标尺寸（含填充方式） */
+function drawImageWithFit(img, tw, th, fitMode) {
+  const cvs = document.createElement('canvas');
+  cvs.width = tw; cvs.height = th;
+  const ctx = cvs.getContext('2d');
+
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  if (!iw || !ih) { ctx.drawImage(img, 0, 0, tw, th); return cvs; }
+
+  if (fitMode === 'contain') {
+    const scale = Math.min(tw / iw, th / ih);
+    const dw = iw * scale, dh = ih * scale;
+    const dx = (tw - dw) / 2, dy = (th - dh) / 2;
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, tw, th);
+    ctx.drawImage(img, dx, dy, dw, dh);
+  } else if (fitMode === 'cover') {
+    const scale = Math.max(tw / iw, th / ih);
+    const dw = iw * scale, dh = ih * scale;
+    const dx = (tw - dw) / 2, dy = (th - dh) / 2;
+    ctx.drawImage(img, dx, dy, dw, dh);
+  } else {
+    // stretch
+    ctx.drawImage(img, 0, 0, tw, th);
+  }
+  return cvs;
+}
+
+/** 刷新单色预览 */
+function updateConverterUI(img) {
+  const tw = parseInt(paramWidth.value) || 128;
+  const th = parseInt(paramHeight.value) || 64;
+  const fit = paramFit ? paramFit.value : 'stretch';
+  const cvs = drawImageWithFit(img, tw, th, fit);
+
+  const opts = {
+    dither: paramDither.checked,
+    threshold: parseInt(paramThreshold.value) || 128,
+    invert: paramInvert.checked,
+  };
+  const pages = canvasToPages(cvs, tw, th, opts);
+
+  // 渲染预览
+  const prevCvs = document.createElement('canvas');
+  prevCvs.width = tw; prevCvs.height = th;
+  const pctx = prevCvs.getContext('2d');
+  const pImg = pctx.createImageData(tw, th);
+  const pp = pImg.data;
+  for (let y = 0; y < th; y++) {
+    const pi = y >>> 3, bit = y & 7;
+    for (let x = 0; x < tw; x++) {
+      const v = (pages[pi][x] >> bit) & 1 ? 255 : 0;
+      const i = (y * tw + x) * 4;
+      pp[i] = v; pp[i+1] = v; pp[i+2] = v; pp[i+3] = 255;
+    }
+  }
+  pctx.putImageData(pImg, 0, 0);
+
+  previewWrap.innerHTML = '';
+  prevCvs.style.maxWidth = Math.min(tw * 3, 400) + 'px';
+  previewWrap.appendChild(prevCvs);
+  convertStatus.textContent = `预览：${tw}×${th} 单色`;
+}
+
+/** 转换按钮 */
+btnConvert.addEventListener('click', () => {
+  if (!converterImage) return;
+
+  const tw = parseInt(paramWidth.value) || 128;
+  const th = parseInt(paramHeight.value) || 64;
+  const threshold = parseInt(paramThreshold.value) || 128;
+  const dither = paramDither.checked;
+  const invert = paramInvert.checked;
+  const fit = paramFit ? paramFit.value : 'stretch';
+  const delay = isAnimatedSource ? (parseInt(paramDelay.value) || 100) : 100;
+
+  btnConvert.disabled = true;
+  btnConvert.textContent = '⏳ 转换中...';
+  convertStatus.textContent = '正在生成 NAF...';
+
+  requestAnimationFrame(() => {
+    try {
+      let nafBuffer;
+
+      if (isAnimatedSource && converterImage._gifBuffer) {
+        nafBuffer = convertGIFFrames(converterImage._gifBuffer, converterImage._gifFrames, tw, th, threshold, dither, invert, delay, fit);
+      } else {
+        nafBuffer = convertStaticImage(converterImage, tw, th, threshold, dither, invert, fit);
+      }
+
+      currentNAFBuffer = nafBuffer;
+      currentNAFName = converterImage._srcName || 'untitled';
+      nafFilenameInput.value = currentNAFName;
+
+      convertStatus.textContent = `✅ 转换完成！${(nafBuffer.byteLength / 1024).toFixed(2)} KB`;
+      notyf.success(`转换完成！${(nafBuffer.byteLength / 1024).toFixed(2)} KB`);
+      btnConvert.textContent = '🚀 开始转换';
+      btnConvert.disabled = false;
+
+      // 跳转到播放器
+      switchTab('player');
+      requestAnimationFrame(() => {
+        loadNAFBuffer(nafBuffer, currentNAFName + '.naf');
+      });
+
+    } catch (e) {
+      convertStatus.textContent = '❌ 转换失败: ' + e.message;
+      btnConvert.textContent = '🚀 开始转换';
+      btnConvert.disabled = false;
+      console.error(e);
     }
   });
+});
 
-  // Init — auto-load if ?file= specified
-  createPlayer();
-  const urlParams = new URLSearchParams(window.location.search);
-  const autoFile = urlParams.get('file');
-  if (autoFile) {
-    fetch(autoFile)
-      .then(r => r.arrayBuffer())
-      .then(buf => {
-        player.loadBuffer(buf);
-        info.textContent = 'Loaded: ' + autoFile;
-      })
-      .catch(e => { info.textContent = 'Failed to load: ' + autoFile; });
+function convertStaticImage(img, tw, th, threshold, dither, invert, fit) {
+  const cvs = drawImageWithFit(img, tw, th, fit || 'stretch');
+  const opts = { dither, threshold, invert };
+  const pages = canvasToPages(cvs, tw, th, opts);
+  const enc = new NAFEncoder(tw, th, { defaultDelay: 100, loopCount: 1 });
+  enc.addFrameRle(pages, 100);
+  return enc.encode();
+}
+
+function convertGIFFrames(gifBuffer, gifFrames, tw, th, threshold, dither, invert, delay, fit) {
+  const enc = new NAFEncoder(tw, th, { defaultDelay: delay, loopCount: 0 });
+  for (let i = 0; i < gifFrames.length; i++) {
+    const cvs = drawImageWithFit(gifFrames[i].canvas, tw, th, fit || 'stretch');
+    const opts = { dither, threshold, invert };
+    const pages = canvasToPages(cvs, tw, th, opts);
+    const fd = gifFrames[i].delay || delay;
+    if (i === 0) enc.addFrameRle(pages, fd);
+    else enc.addFrameDeltaRle(pages, fd);
   }
+  return enc.encode();
+}
+
+// ════════════════════════════════════════════════════════════
+//  TAB 3: 播放器
+// ════════════════════════════════════════════════════════════
+
+function createPlayer() {
+  if (player) { player.pause(); player.destroy(); player = null; }
+  // 确保 viewer 容器存在
+  if (!viewer) return;
+  const scale = parseInt(scaleSlider.value) || 2;
+  player = new NAFRender(viewer, { scale, fps: 0, autoplay: false });
+  player.on('frame', i => {
+    frameSlider.value = i;
+    frameLabel.textContent = `${i + 1} / ${player.frameCount}`;
+  });
+  player.on('load', meta => {
+    const sizeKB = currentNAFBuffer ? (currentNAFBuffer.byteLength / 1024).toFixed(2) : '?';
+    info.innerHTML = `<span style="color:#fff;">${meta.width}&times;${meta.height}</span> · ${meta.frameCount} 帧 · ${meta.defaultDelay}ms · ${sizeKB} KB`;
+    frameSlider.max = meta.frameCount - 1;
+    frameSlider.disabled = meta.frameCount < 2;
+    btnPlay.disabled = meta.frameCount < 2;
+    btnPrev.disabled = meta.frameCount < 2;
+    btnNext.disabled = meta.frameCount < 2;
+    frameLabel.textContent = `1 / ${meta.frameCount}`;
+  });
+}
+
+function loadNAFFile(file) {
+  currentNAFName = file.name.replace(/\.naf$/i, '');
+  nafFilenameInput.value = currentNAFName;
+  createPlayer();
+  const reader = new FileReader();
+  reader.onload = () => {
+    currentNAFBuffer = reader.result;
+    player.loadBuffer(reader.result);
+    btnDownload.disabled = false;
+    if (player.frameCount > 1) { player.play(); syncPlayBtn(); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function loadNAFBuffer(buffer, name) {
+  currentNAFName = name.replace(/\.naf$/i, '');
+  nafFilenameInput.value = currentNAFName;
+  createPlayer();
+  player.loadBuffer(buffer);
+  btnDownload.disabled = false;
+  if (player.frameCount > 1) { player.play(); syncPlayBtn(); }
+}
+
+function syncPlayBtn() {
+  if (player && player.isPlaying) btnPlay.textContent = '⏸ 暂停';
+  else btnPlay.textContent = '▶ 播放';
+}
+
+// 播放器 → 下载到ESP32
+btnDownload.addEventListener('click', () => {
+  if (!currentNAFBuffer) return;
+  if (!esp32 || !esp32.isConnected) {
+    notyf.error('请先在右上角连接 ESP32 设备');
+    esp32Dropdown.classList.add('open');
+    return;
+  }
+  btnEspSend.click();
+});
+
+// 控件
+btnPlay.addEventListener('click', () => { if (player) { player.toggle(); syncPlayBtn(); } });
+btnPrev.addEventListener('click', () => { if (player) { player.pause(); syncPlayBtn(); player.seek(player.currentFrame - 1); } });
+btnNext.addEventListener('click', () => { if (player) { player.pause(); syncPlayBtn(); player.step(); } });
+frameSlider.addEventListener('input', () => { if (player) { player.pause(); syncPlayBtn(); player.seek(parseInt(frameSlider.value)); } });
+fpsSlider.addEventListener('input', () => {
+  const v = parseInt(fpsSlider.value);
+  fpsLabel.textContent = v + ' fps';
+  if (player) { player._fps = v; if (player.isPlaying) { player.pause(); player.play(); } }
+});
+scaleSlider.addEventListener('input', () => {
+  const v = parseInt(scaleSlider.value);
+  scaleLabel.textContent = v + 'x';
+  if (player && player._naf) {
+    player._scale = v;
+    player._canvas.width  = player._naf.width * v;
+    player._canvas.height = player._naf.height * v;
+    player._render();
+  }
+});
+
+playerInvert.addEventListener('change', () => {
+  if (player) player.setInvert(playerInvert.checked);
+});
+
+// ════════════════════════════════════════════════════════════
+//  TAB 2: 画廊
+// ════════════════════════════════════════════════════════════
+
+// 画廊数据由 API 动态获取
+
+async function buildGallery() {
+  const grid = $('#gallery-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  const progText = $('#gallery-progress-text');
+  progText.textContent = '加载中...';
+
+  // 从 API 动态获取
+  let list;
+  try {
+    const resp = await fetch('/api/examples');
+    list = await resp.json();
+  } catch (e) {
+    progText.textContent = '无法加载画廊（请确认通过 http://localhost 访问）';
+    return;
+  }
+
+  const sections = {};
+  for (const ex of list) {
+    const sec = ex.section || '__root__';
+    if (!sections[sec]) sections[sec] = [];
+    sections[sec].push(ex);
+  }
+  const secNames = Object.keys(sections).sort((a, b) => {
+    if (a === '__root__') return -1; if (b === '__root__') return 1;
+    return a.localeCompare(b);
+  });
+
+  const totalItems = list.length;
+  let loadedCount = 0;
+  progText.textContent = `0 / ${totalItems}`;
+
+  function onItemLoaded() {
+    loadedCount++;
+    progText.textContent = `${loadedCount} / ${totalItems}`;
+    if (loadedCount >= totalItems) {
+      progText.textContent = '';
+      grid.querySelectorAll('.gallery-card .actions button').forEach(b => b.disabled = false);
+    }
+  }
+
+  for (const secName of secNames) {
+    if (secName !== '__root__') {
+      const header = document.createElement('div');
+      header.style.cssText = 'grid-column:1/-1;font-size:0.85em;color:var(--hl);padding:8px 0 2px;margin-top:4px;';
+      header.textContent = secName.replace(/_/g, ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      grid.appendChild(header);
+    }
+
+    for (const ex of sections[secName]) {
+      const card = document.createElement('div');
+      card.className = 'gallery-card';
+      const gfxWrap = document.createElement('div');
+      gfxWrap.className = 'gfx-wrap';
+      const placeholder = document.createElement('span');
+      placeholder.className = 'placeholder';
+      placeholder.textContent = '加载中...';
+      gfxWrap.appendChild(placeholder);
+
+      const metaDiv = document.createElement('div');
+      metaDiv.className = 'meta';
+      metaDiv.innerHTML = `<strong>${ex.name.replace(/_/g, ' ')}</strong>`;
+
+      card.addEventListener('click', () => loadGalleryNAF(ex));
+
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'actions';
+      const espBtn = document.createElement('button');
+      espBtn.textContent = '下载到 ESP32';
+      espBtn.addEventListener('click', (e) => { e.stopPropagation(); sendGalleryToESP32(ex); });
+      espBtn.disabled = true;
+      actionsDiv.appendChild(espBtn);
+
+      card.appendChild(gfxWrap);
+      card.appendChild(metaDiv);
+      card.appendChild(actionsDiv);
+
+      loadGalleryItem(ex, gfxWrap, placeholder, metaDiv, onItemLoaded);
+      grid.appendChild(card);
+    }
+  }
+}
+
+function loadGalleryItem(ex, gfxWrap, placeholder, metaDiv, onLoaded) {
+  fetch(ex.path)
+    .then(resp => {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.arrayBuffer();
+    })
+    .then(buffer => {
+      const parser = new NAFRender.Parser(buffer);
+      const meta = {
+        width: parser.width,
+        height: parser.height,
+        frameCount: parser.frameCount,
+        defaultDelay: parser.defaultDelay,
+        sizeKB: (buffer.byteLength / 1024).toFixed(2),
+      };
+      metaDiv.innerHTML = `<strong>${ex.name.replace(/_/g, ' ')}</strong>${meta.width}&times;${meta.height} &middot; ${meta.frameCount} 帧 &middot; ${meta.sizeKB} KB`;
+
+      if (meta.frameCount <= 1) {
+        renderStaticFrame(parser, gfxWrap, placeholder, meta);
+        if (onLoaded) onLoaded();
+        return;
+      }
+      setupHoverPlayer(gfxWrap, placeholder, buffer, meta, parser);
+      if (onLoaded) onLoaded();
+    })
+    .catch(err => {
+      placeholder.textContent = '!';
+      metaDiv.innerHTML = `<strong>${ex.name.replace(/_/g, ' ')}</strong><br>加载失败`;
+      if (onLoaded) onLoaded();
+    });
+}
+
+function renderStaticFrame(parser, gfxWrap, placeholder, meta) {
+  placeholder.remove();
+  const frame = parser.getFrame(0);
+  if (!frame) return;
+  const cvs = document.createElement('canvas');
+  cvs.width = meta.width; cvs.height = meta.height;
+  const ctx = cvs.getContext('2d');
+  const imgData = ctx.createImageData(meta.width, meta.height);
+  const px = imgData.data;
+  for (let y = 0; y < meta.height; y++) {
+    const pi = y >>> 3, bit = y & 7;
+    for (let x = 0; x < meta.width; x++) {
+      const v = (frame[pi * meta.width + x] >> bit) & 1 ? 255 : 0;
+      const i = (y * meta.width + x) * 4;
+      px[i] = v; px[i+1] = v; px[i+2] = v; px[i+3] = 255;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+  gfxWrap.appendChild(cvs);
+}
+
+function setupHoverPlayer(gfxWrap, placeholder, buffer, meta, parser) {
+  placeholder.remove();
+
+  const target = document.createElement('div');
+  gfxWrap.appendChild(target);
+
+  const fps = meta.defaultDelay > 0 ? Math.round(1000 / meta.defaultDelay) : 10;
+  const p = new NAFRender(target, { scale: 1, fps, autoplay: true, loop: true });
+  p.loadBuffer(buffer);
+}
+
+function loadGalleryNAF(ex) {
+  fetch(ex.path)
+    .then(r => r.arrayBuffer())
+    .then(buf => {
+      currentNAFBuffer = buf;
+      // 用原始文件名（从路径提取，保留大小写和空格/下划线）
+      currentNAFName = ex.path.split('/').pop().replace(/\.naf$/i, '');
+      nafFilenameInput.value = currentNAFName;
+      switchTab('player');
+      requestAnimationFrame(() => {
+        loadNAFBuffer(buf, currentNAFName);
+      });
+    })
+    .catch(err => notyf.error('加载失败: ' + err.message));
+}
+
+// 初始化画廊
+buildGallery();
+
+// 画廊卡片 → ESP32 快捷写入
+function sendGalleryToESP32(ex) {
+  if (!esp32 || !esp32.isConnected) {
+    notyf.error('请先在右上角连接 ESP32 设备');
+    esp32Dropdown.classList.add('open');
+    return;
+  }
+  fetch(ex.path)
+    .then(r => r.arrayBuffer())
+    .then(buf => {
+      currentNAFBuffer = buf;
+      currentNAFName = ex.path.split('/').pop().replace(/\.naf$/i, '');
+      nafFilenameInput.value = currentNAFName;
+      btnEspSend.click();
+    })
+    .catch(err => notyf.error('获取文件失败: ' + err.message));
+}
+
+// ════════════════════════════════════════════════════════════
+//  ESP32 Web Serial（右上角角标）
+// ════════════════════════════════════════════════════════════
+
+// 点击角标切换下拉面板
+esp32Corner.addEventListener('click', e => {
+  e.stopPropagation();
+  esp32Dropdown.classList.toggle('open');
+});
+document.addEventListener('click', e => {
+  if (!esp32Corner.contains(e.target) && !esp32Dropdown.contains(e.target)) {
+    esp32Dropdown.classList.remove('open');
+  }
+});
+
+// 连接 / 断开
+btnEspConn.addEventListener('click', async () => {
+  // 先检测浏览器支持
+  if (!('serial' in navigator)) {
+    notyf.error('当前浏览器不支持 Web Serial API。请使用 Chrome 或 Edge 桌面版。');
+    return;
+  }
+
+  if (esp32 && esp32.isConnected) {
+    try {
+      btnEspConn.textContent = '断开中...'; btnEspConn.disabled = true;
+      await esp32.disconnect();
+      esp32StatusT.textContent = '未连接'; esp32StatusT.className = '';
+      btnEspConn.textContent = '连接设备'; btnEspConn.disabled = false;
+      btnEspSend.style.display = 'none';
+      esp32Corner.classList.remove('connected');
+      esp32 = null;
+    } catch (e) {
+      esp32StatusT.textContent = '断开失败: ' + e.message; esp32StatusT.className = 'err';
+      btnEspConn.textContent = '连接设备'; btnEspConn.disabled = false;
+    }
+    return;
+  }
+
+  try {
+    btnEspConn.textContent = '连接中...'; btnEspConn.disabled = true;
+    esp32StatusT.textContent = '请在弹出窗口中选择 ESP32 设备...\n（如果列表为空，请检查驱动和连接）'; esp32StatusT.className = '';
+
+    esp32 = new ESP32Serial();
+    const { info } = await esp32.connect();
+    esp32StatusT.textContent = '✅ 已连接 — ' + (info || 'REPL 就绪');
+    esp32StatusT.className = 'ok';
+    btnEspConn.textContent = '断开连接'; btnEspConn.disabled = false;
+    btnEspSend.style.display = 'inline-block';
+    esp32Corner.classList.add('connected');
+  } catch (e) {
+    esp32StatusT.textContent = '❌ ' + e.message; esp32StatusT.className = 'err';
+    btnEspConn.textContent = '连接设备'; btnEspConn.disabled = false;
+    esp32 = null;
+  }
+});
+
+// 写入 NAF
+btnEspSend.addEventListener('click', async () => {
+  if (!esp32 || !esp32.isConnected) { notyf.error('请先连接 ESP32 设备'); return; }
+  if (!currentNAFBuffer) { notyf.error('没有可写入的 NAF 数据。请先加载或转换一个 NAF 文件。'); return; }
+
+  // 禁用所有下载按钮
+  const allDLBtns = document.querySelectorAll('#btn-download, .gallery-card .actions button, #btn-esp-send');
+  allDLBtns.forEach(b => { b.disabled = true; b.dataset.wasDisabled = '1'; });
+  btnEspSend.disabled = true; btnEspSend.textContent = '写入中...';
+
+  // 底部进度条
+  const writeBar = $('#write-progress-bar');
+  const writeFill = $('#write-progress-fill');
+  const writePct = $('#write-progress-pct');
+  writeBar.style.display = 'block';
+  writeFill.style.width = '0%';
+  writePct.textContent = '0%';
+
+  const onProg = (pct) => {
+    esp32ProgBar.style.width = pct + '%';
+    writeFill.style.width = pct + '%';
+    writePct.textContent = pct + '%';
+  };
+
+  // 用当前帧率更新 NAF 的 default_delay
+  const fps = parseInt(fpsSlider.value) || 10;
+  const newDelay = Math.round(1000 / fps);
+
+  let buf = currentNAFBuffer.slice(0);
+
+  // 如果反色开启，重建 NAF
+  const doInvert = playerInvert.checked;
+  if (doInvert) {
+    try {
+      const parser = new NAFRender.Parser(buf);
+      buf = NAFEncoder.invertNAF(parser);
+    } catch (e) {
+      console.error('反色重建失败', e);
+      // 继续用原数据
+    }
+  }
+
+  // 写入帧率
+  const view = new DataView(buf);
+  view.setUint16(0x0C, newDelay, false); // BE, offset 0x0C = default_delay
+
+  const fileName = (nafFilenameInput.value.trim() || currentNAFName || 'untitled') + '.naf';
+  currentNAFName = nafFilenameInput.value.trim() || currentNAFName;
+  const remotePath = '/nafs/' + fileName;
+
+  esp32Prog.classList.add('on'); esp32ProgBar.style.width = '0%';
+
+  try {
+    await esp32.writeFile(remotePath, buf, onProg);
+    writePct.textContent = '100%';
+    writeFill.style.width = '100%';
+    const flags = [];
+    if (doInvert) flags.push('已反色');
+    flags.push(`${newDelay}ms ≈ ${fps}fps`);
+    notyf.success(`已写入 ${remotePath}（${flags.join('，')}）`);
+    esp32StatusT.textContent = `✅ ${remotePath}（${flags.join('，')}）`;
+    esp32StatusT.className = 'ok';
+  } catch (e) {
+    esp32StatusT.textContent = '❌ 写入失败: ' + e.message; esp32StatusT.className = 'err';
+  } finally {
+    // 恢复下载按钮
+    document.querySelectorAll('[data-was-disabled]').forEach(b => { b.disabled = false; delete b.dataset.wasDisabled; });
+    btnEspSend.disabled = false; btnEspSend.textContent = '写入到 /nafs/';
+    setTimeout(() => { esp32Prog.classList.remove('on'); writeBar.style.display = 'none'; }, 2000);
+  }
+});
+
+// 便捷别名
+window.NAFParser = NAFRender.Parser;
+
+// ════════════════════════════════════════════════════════════
+//  初始化：创建播放器，加载 ?file= 参数
+// ════════════════════════════════════════════════════════════
+
+createPlayer();
+
+const urlParams = new URLSearchParams(window.location.search);
+const autoFile = urlParams.get('file');
+if (autoFile) {
+  fetch(autoFile)
+    .then(r => r.arrayBuffer())
+    .then(buf => {
+      currentNAFBuffer = buf;
+      currentNAFName = autoFile.split('/').pop().replace(/\.naf$/i, '');
+      loadNAFBuffer(buf, currentNAFName);
+    })
+    .catch(e => { info.textContent = '加载失败: ' + autoFile; });
+}
 </script>
 </body>
 </html>

@@ -11,17 +11,18 @@ import argparse, sys
 from PIL import Image, ImageOps
 from naf_encoder import NAFEncoder
 from naf_convert import image_to_pages, floyd_steinberg
+from img2naf import fit_image
 
 
 def gif_to_naf(input_path, output_path, width, height,
                delay=100, threshold=128, dither=False,
                use_delta=True, loop_count=0,
-               invert=True, callback=None):
+               invert=True, fit='stretch', callback=None):
     """
     Convert animated GIF to NAF.
 
     invert: Invert black/white (default True — white→black, black→white).
-            Use invert=False to keep original colors.
+    fit:    stretch | contain | cover
     """
     gif = Image.open(input_path)
     enc = NAFEncoder(width, height, default_delay=delay, loop_count=loop_count)
@@ -35,6 +36,7 @@ def gif_to_naf(input_path, output_path, width, height,
             bg = Image.new('RGBA', gif.size, (255, 255, 255, 255))
             bg.paste(frame_img, (0, 0), frame_img)
             gray = bg.convert('L')
+            gray = fit_image(gray, width, height, fit)
 
             mono = (floyd_steinberg(gray, threshold) if dither
                     else gray.point(lambda p: 255 if p >= threshold else 0).convert('1'))
@@ -83,6 +85,8 @@ def main():
     parser.add_argument('--no-delta', action='store_true', help='Disable delta compression')
     parser.add_argument('--no-invert', action='store_true', help='Disable invert (keep original colors)')
     parser.add_argument('-l', '--loop', type=int, default=0, help='Loop count (0=forever)')
+    parser.add_argument('--fit', choices=['stretch','contain','cover'], default='stretch',
+                        help='Fit mode (default: stretch)')
     args = parser.parse_args()
 
     if args.width < 1 or args.height < 1:
@@ -96,7 +100,7 @@ def main():
         delay=args.delay, threshold=args.threshold,
         dither=args.dither, use_delta=not args.no_delta,
         loop_count=args.loop,
-        invert=not args.no_invert,
+        invert=not args.no_invert, fit=args.fit,
         callback=cb,
     )
     print()

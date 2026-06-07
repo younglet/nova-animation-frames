@@ -1,14 +1,18 @@
 /**
- * naf-render.js — Nova Animation Frames Renderer v1.0
+ * naf-render.js — Nova Animation Frames Renderer v1.1
  *
  * Lightweight NAF decoder + Canvas renderer. Zero dependencies.
  * Specify a target DOM element, load a .naf file, play/pause/seek.
+ *
+ * 配合 naf.js 使用：naf.js 提供编码/转换，naf-render.js 提供解码/播放。
+ * 加载顺序：先 naf.js（编码），后 naf-render.js（解码+播放）。
  *
  * Usage:
  *   // ES module
  *   import { NAFRender } from './naf-render.js';
  *
- *   // Standalone (adds window.NAFRender)
+ *   // Standalone (adds window.NAFRender, window.NAFParser)
+ *   <script src="js/naf.js"></script>
  *   <script src="naf-render.js"></script>
  *
  * API:
@@ -20,6 +24,9 @@
  *   player.seek(5);
  *   player.on('frame', (i) => { ... });
  *   player.destroy();
+ *
+ *   // Also exports NAFParser for raw decoding
+ *   const parser = new NAFParser(arrayBuffer);
  */
 
 (function (root, factory) {
@@ -172,6 +179,7 @@
       this._fps      = opts.fps      || 0;
       this._autoplay = opts.autoplay !== false;
       this._loop     = opts.loop     !== false;
+      this._invert   = false;
 
       this._naf      = null;
       this._frame    = 0;
@@ -312,10 +320,12 @@
       const imgData = this._ctx.createImageData(w * s, h * s);
       const px = imgData.data;
 
+      const invert = this._invert;
       for (let y = 0; y < h; y++) {
         const page = y >>> 3, bit = y & 7;
         for (let x = 0; x < w; x++) {
-          const val = (frame[page * w + x] >> bit) & 1 ? 255 : 0;
+          let val = (frame[page * w + x] >> bit) & 1 ? 255 : 0;
+          if (invert) val = 255 - val;
           for (let sy = 0; sy < s; sy++) {
             for (let sx = 0; sx < s; sx++) {
               const i = ((y * s + sy) * w * s + (x * s + sx)) * 4;
@@ -340,6 +350,13 @@
       this._events[event].push(callback);
       return this;
     }
+
+    /** Toggle invert mode (black ↔ white). Re-renders current frame. */
+    setInvert(on) {
+      this._invert = !!on;
+      this._render();
+    }
+    get invert() { return this._invert; }
 
     /** Remove an event listener. */
     off(event, callback) {
@@ -382,6 +399,9 @@
   // ════════════════════════════════════════════════════════════
   //  Export
   // ════════════════════════════════════════════════════════════
+
+  // Attach NAFParser to NAFRender for external use (gallery, etc.)
+  NAFRender.Parser = NAFParser;
 
   return NAFRender;
 }));
