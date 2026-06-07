@@ -220,9 +220,17 @@ class SSD1306(framebuf.FrameBuffer):
         Args:
             naf:      NAF instance
             x, y:     Top-left position (supports negative for clipping)
-            interval: Frame interval in ms. None = use naf.default_delay.
+            interval: Frame interval in ms.
+                      None  = use naf.default_delay
+                      -1    = static mode, render first frame only
         """
         if naf.frames == 0:
+            return
+
+        if interval == -1:
+            self.fill(0)
+            self.blit_naf_frame(naf[0], x, y)
+            self.show()
             return
 
         ms = interval if interval is not None else naf.default_delay

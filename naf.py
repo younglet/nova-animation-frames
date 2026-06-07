@@ -17,6 +17,15 @@ Usage:
   frame = naf.get_frame(0)
   # frame[page] = bytearray(width bytes), MONO_VLSB layout
 
+  # 2D slice → new NAFFrame
+  sub = frame[0:16, 8:24]           # y, x → 16×16 region
+  inverted = ~sub                    # invert
+  frame.paste(inverted, x=8, y=0)   # paste back
+
+  # Pixel access
+  frame.get_pixel(x, y)             # → 0 | 1
+  frame.set_pixel(x, y, 1)          # set / clear
+
   naf.close()
 """
 
@@ -49,15 +58,153 @@ class NAFFrame:
         self.width = width
         self.height = height
 
-    def __getitem__(self, page):
-        """frame[page] → bytearray for that page."""
-        return self.pages[page]
+    def __getitem__(self, key):
+        """frame[page] → bytearray, or frame[y:y2, x:x2] → NAFFrame."""
+        if isinstance(key, int):
+            return self.pages[key]
+        if isinstance(key, tuple):
+            return self._slice(key)
+        raise TypeError("NAFFrame index must be int (page) or tuple of slices (y, x)")
 
     def __len__(self):
         return len(self.pages)
 
     def __iter__(self):
         return iter(self.pages)
+
+    # ── Pixel access ────────────────────────────────────
+
+    def get_pixel(self, x, y):
+        """Return 0 or 1 for pixel at (x, y)."""
+        if x < 0 or x >= self.width or y < 0 or y >= self.height:
+            return 0
+        page = y >> 3
+        bit = y & 7
+        return (self.pages[page][x] >> bit) & 1
+
+    def set_pixel(self, x, y, val):
+        """Set pixel at (x, y) to 0 or 1. Bounds are silently clipped."""
+        if x < 0 or x >= self.width or y < 0 or y >= self.height:
+            return
+        page = y >> 3
+        bit = y & 7
+        if val:
+            self.pages[page][x] |= (1 << bit)
+        else:
+            self.pages[page][x] &= ~(1 << bit) & 0xFF
+
+    # ── 2D slice ────────────────────────────────────────
+
+    def _slice(self, key):
+        """frame[y0:y1, x0:x1] → new NAFFrame."""
+        if len(key) != 2:
+            raise ValueError("Slice requires exactly 2 dimensions: [y, x]")
+        yk, xk = key
+
+        def _norm(s, limit):
+            if isinstance(s, int):
+                return s, s + 1
+            start = s.start if s.start is not None else 0
+            stop = s.stop if s.stop is not None else limit
+            if start < 0:
+                start = 0
+            if stop > limit:
+                stop = limit
+            if stop < start:
+                stop = start
+            return start, stop
+
+        y0, y1 = _norm(yk, self.height)
+        x0, x1 = _norm(xk, self.width)
+        new_w = x1 - x0
+        new_h = y1 - y0
+        new_pages_count = (new_h + 7) // 8
+
+        if new_w == 0 or new_h == 0:
+            return NAFFrame([bytearray(0) for _ in range(new_pages_count)],
+                            new_w, new_h)
+
+        bit_shift = y0 & 7  # offset within source page
+        src_page0 = y0 >> 3
+
+        new_pages = []
+        for p in range(new_pages_count):
+            sp = src_page0 + p
+            dst = bytearray(new_w)
+
+            if bit_shift == 0:
+                # Y aligned: straight copy
+                src = self.pages[sp]
+                for col in range(new_w):
+                    dst[col] = src[x0 + col]
+            else:
+                # Cross-page shift: each output byte = bits from two source pages
+                src0 = self.pages[sp]
+                src1 = self.pages[sp + 1] if sp + 1 < len(self.pages) else None
+                inv_shift = 8 - bit_shift
+                for col in range(new_w):
+                    byte0 = src0[x0 + col]
+                    hi = byte0 >> bit_shift
+                    if src1 is not None:
+                        lo = (src1[x0 + col] & ((1 << bit_shift) - 1)) << inv_shift
+                    else:
+                        lo = 0
+                    dst[col] = (hi | lo) & 0xFF
+
+            new_pages.append(dst)
+
+        # Mask trailing bits on last page
+        trailing = new_h & 7
+        if trailing:
+            mask = (1 << trailing) - 1
+            last = new_pages[-1]
+            for i in range(len(last)):
+                last[i] &= mask
+
+        return NAFFrame(new_pages, new_w, new_h)
+
+    # ── Paste ───────────────────────────────────────────
+
+    def paste(self, src, x=0, y=0):
+        """Paste `src` NAFFrame into self at (x, y). Modifies self in-place.
+
+        Pixels outside the destination are silently clipped.
+        Returns self for chaining.
+        """
+        # Clip source region to destination bounds
+        sx0 = max(0, -x)
+        sy0 = max(0, -y)
+        sx1 = min(src.width, self.width - x)
+        sy1 = min(src.height, self.height - y)
+
+        if sx1 <= sx0 or sy1 <= sy0:
+            return self
+
+        w = sx1 - sx0
+        h = sy1 - sy0
+
+        # Fast path: both Y-aligned to page boundaries
+        if (y & 7) == 0 and (sy0 & 7) == 0:
+            dst_page0 = y >> 3
+            src_page0 = sy0 >> 3
+            page_count = (h + 7) // 8
+            for p in range(page_count):
+                dp = dst_page0 + p
+                sp = src_page0 + p
+                if dp >= len(self.pages) or sp >= len(src.pages):
+                    break
+                pd = self.pages[dp]
+                ps = src.pages[sp]
+                for col in range(w):
+                    pd[x + sx0 + col] = ps[sx0 + col]
+            return self
+
+        # General case: per-pixel
+        for dy in range(h):
+            for dx in range(w):
+                pixel = src.get_pixel(sx0 + dx, sy0 + dy)
+                self.set_pixel(x + sx0 + dx, y + sy0 + dy, pixel)
+        return self
 
     def invert(self):
         """Flip all bits in-place (black ↔ white). Returns self."""

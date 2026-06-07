@@ -51,10 +51,33 @@ oled = SSD1306(128, 64, i2c)
 naf = NAF("animation.naf")     # 文件
 # naf = NAF(b'\x4E\x41...')    # 或内存 bytes
 
+# 渲染单帧
 oled.blit_naf_frame(naf[0])             # 第 0 帧，全屏
 oled.blit_naf_frame(naf[3], x=16, y=8)  # 第 3 帧，偏移
 oled.show()
 
 # 播放完整动画
 oled.blit_naf(naf)                      # 全屏，自动帧间隔
+oled.blit_naf(naf, interval=200)        # 自定义帧间隔 200ms
+oled.blit_naf(naf, interval=-1)         # 静态模式，只渲染第一帧
+```
+
+### 帧操作 (切片 / 像素 / 粘贴)
+
+```python
+frame = naf[0]
+
+# 像素读写
+frame.get_pixel(x, y)         # → 0 | 1
+frame.set_pixel(x, y, 1)      # 点亮 (x,y)
+
+# 二维切片 (返回新 NAFFrame)
+sub = frame[0:32, 16:48]      # 32×32 子区域
+
+# 反色
+flipped = ~sub                 # 新帧
+sub.invert()                   # 原地反色
+
+# 粘贴回原帧
+frame.paste(flipped, x=16, y=0)
 ```
