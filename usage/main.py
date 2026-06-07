@@ -23,10 +23,25 @@ oled = SSD1306(128, 64, i2c)
 
 def demo_single():
     naf = NAF("demo.naf")
+
+    # Original position
     oled.fill(0)
-    oled.blit_naf_frame(naf[0])       # frame 0 at (0, 0)
-    oled.blit_naf_frame(naf[0], 16, 8)  # frame 0 at (16, 8)
+    oled.blit_naf_frame(naf[0])
     oled.show()
+    time.sleep(1)
+
+    # Offset position
+    oled.fill(0)
+    oled.blit_naf_frame(naf[0], x=16, y=8)
+    oled.show()
+    time.sleep(1)
+
+    # Bottom-right corner
+    oled.fill(0)
+    oled.blit_naf_frame(naf[0], x=64, y=32)
+    oled.show()
+    time.sleep(1)
+
     naf.close()
 
 
@@ -51,5 +66,17 @@ def demo_memory():
 
 # ── Run ───────────────────────────────────────────────────
 
+def demo_bad_apple():
+    print('loading bad_apple.naf...')
+    naf = NAF('bad_apple.naf')
+    print(naf.width, 'x', naf.height, 'frames:', naf.frames)
+    oled.blit_naf(naf, interval=33)  # 30fps
+    naf.close()
+
+
 if __name__ == '__main__':
-    demo_single()
+    print('loading genshin_start.naf...')
+    naf = NAF('genshin_start.naf')
+    print(naf.width, 'x', naf.height, 'frames:', naf.frames)
+    oled.blit_naf(naf, interval=33)  # 30fps
+    naf.close()

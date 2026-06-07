@@ -421,7 +421,7 @@ class NAF:
                 if pos < dlen:
                     val = data[pos]
                     pos += 1
-                    out.extend(bytearray([val]) * count)
+                    out.extend(bytes([val]) * count)
 
         need = target_len - len(out)
         if need > 0:
